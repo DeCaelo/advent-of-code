@@ -1,56 +1,188 @@
-use std::fs;
-use std::io;
+use ::phf::{phf_map, Map};
+use inline_colorization::*;
+use lazy_static::lazy_static;
+use std::{collections::HashMap, fmt::Display, fs};
+use strum::{EnumIter, IntoEnumIterator};
 
-fn calculate_score(line: &str) -> u32 {
-    // Transformer A, B, C et X, Y, Z en 0, 1, 2 respectivement en utilisant leur ordre ASCII
-    let left = match line.as_bytes()[0] {
-        b'A' => 0,
-        b'B' => 1,
-        b'C' => 2,
-        _ => unreachable!(),
-    };
-
-    let right = match line.as_bytes()[2] {
-        b'X' => 0,
-        b'Y' => 1,
-        b'Z' => 2,
-        _ => unreachable!(),
-    };
-
-    let my_shape = right as i8;
-    let opponent_shape = left as i8;
-    let outcome = (my_shape - opponent_shape + 1).rem_euclid(3);
-
-    let shape_score = my_shape + 1;
-    let outcome_score = 3 * outcome;
-
-    (shape_score + outcome_score) as u32
+#[derive(Copy, Clone, Eq, PartialEq, Hash, EnumIter)]
+enum Choice {
+    Rock,
+    Paper,
+    Scissors,
 }
 
-fn main() -> io::Result<()> {
-    // Lire le contenu du fichier "input" dans une chaîne de caractères
-    let input = fs::read_to_string("input")?;
-    // Gérer les erreurs liées à la lecture du fichier avec ?
-    // Parcourir chaque ligne du fichier, calculer le score pour chaque tour et sommer les scores
-    let total_score: u32 = input.lines().map(calculate_score).sum();
-
-    println!("{}", total_score);
-    Ok(())
+impl Display for Choice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Choice::Rock => "Rock",
+            Choice::Paper => "Paper",
+            Choice::Scissors => "Scissors",
+        })?;
+        Ok(())
+    }
 }
 
-// La méthode rem_euclid est une fonction dans Rust qui permet de calculer
-// le reste de la division euclidienne d'un nombre par un autre.
-// En mathématiques, la division euclidienne est une opération qui divise un nombre en deux parties :
-// le quotient et le reste. Le reste de la division euclidienne est toujours un nombre positif ou nul.
+enum MatchResult {
+    Win,
+    Tie,
+    Lose,
+}
 
-// Dans le code que vous avez fourni, rem_euclid(3) est utilisé pour calculer
-// le reste de la division euclidienne de (my_shape - opponent_shape + 1) par 3.
-// Cela permet de normaliser le résultat de manière à ce qu'il soit toujours compris entre 0, 1 et 2.
+// static map variant that works with enums - https://users.rust-lang.org/t/is-there-a-way-to-create-a-constant-map-in-rust/8358/10
+lazy_static! {
+    static ref BEATS_MAP: HashMap<Choice, Choice> = [
+        (Choice::Rock, Choice::Scissors),
+        (Choice::Paper, Choice::Rock),
+        (Choice::Scissors, Choice::Paper),
+    ]
+    .iter()
+    .copied()
+    .collect();
+}
 
-// Voici comment cela fonctionne :
+// phf variant (doesnt work for enums): https://users.rust-lang.org/t/is-there-a-way-to-create-a-constant-map-in-rust/8358/11
+static OPPONENT_CHOICE_MAP: Map<&str, Choice> = phf_map! {
+    "A" => Choice::Rock,
+    "B" => Choice::Paper,
+    "C" => Choice::Scissors,
+};
+static MY_CHOICE_MAP: Map<&str, Choice> = phf_map! {
+    "X" => Choice::Rock,
+    "Y" => Choice::Paper,
+    "Z" => Choice::Scissors,
+};
 
-// Si my_shape - opponent_shape + 1 est égal à 0, le reste de la division euclidienne par 3 sera 0.
-// Si my_shape - opponent_shape + 1 est égal à 1, le reste de la division euclidienne par 3 sera 1.
-// Si my_shape - opponent_shape + 1 est égal à 2, le reste de la division euclidienne par 3 sera 2.
-// Cela permet de représenter les trois résultats possibles du jeu (défaite, égalité, victoire)
-// avec des valeurs de 0 à 2, ce qui peut être plus facile à manipuler dans le code.
+fn match_result(opponent: Choice, mine: Choice) -> MatchResult {
+    let opponent_beats = BEATS_MAP.get(&opponent).expect("Exhaustive BEATS_MAP");
+    let mine_beats = BEATS_MAP.get(&mine).expect("Exhaustive BEATS_MAP");
+    println!(
+        "opponent {} {color_green} beats {} {color_yellow}, mine {} beats {} {color_red}",
+        opponent, opponent_beats, mine, mine_beats
+    );
+    if opponent_beats == &mine {
+        MatchResult::Lose
+    } else if mine_beats == &opponent {
+        MatchResult::Win
+    } else {
+        MatchResult::Tie
+    }
+}
+
+fn calc_score(opponent: Choice, mine: Choice) -> u16 {
+    let selecion_score = match mine {
+        Choice::Rock => 1,
+        Choice::Paper => 2,
+        Choice::Scissors => 3,
+    };
+
+    let match_score = match match_result(opponent, mine) {
+        MatchResult::Win => 6,
+        MatchResult::Tie => 3,
+        MatchResult::Lose => 0,
+    };
+
+    println!(
+        "Score: sel={} , match={} => {},",
+        selecion_score,
+        match_score,
+        selecion_score + match_score
+    );
+    selecion_score + match_score
+}
+
+fn process_game(
+    content: String,
+    perform_logic: for<'a> fn(&'a str, &'a str) -> (Choice, Choice),
+) -> String {
+    // println!("Input: {}", content);
+    let mut total_score: u16 = 0;
+    for line in content.lines() {
+        let line_split = line.split_whitespace().collect::<Vec<_>>();
+        let [enc_opponent, enc_mine] = line_split.as_slice() else {
+            panic!("Invalid input line: {}", line)
+        };
+        let (choice_opp, choice_mine) = perform_logic(enc_opponent, enc_mine);
+        let score = calc_score(choice_opp, choice_mine);
+        total_score += score;
+        println!(
+            "Opp: {} {color_cyan}, Me: {} => {} {color_white} ==> TOTAL={}",
+            enc_opponent, enc_mine, score, total_score
+        );
+    }
+    total_score.to_string()
+}
+
+fn process_part1(content: String) -> String {
+    process_game(content, |enc_opponent, enc_mine| {
+        let choice_opp = OPPONENT_CHOICE_MAP
+            .get(enc_opponent)
+            .expect("Exhaustive OPPONENT_CHOICE_MAP");
+        let choice_mine = MY_CHOICE_MAP
+            .get(enc_mine)
+            .expect("Exhaustive MY_CHOICE_MAP");
+        (*choice_opp, *choice_mine)
+    })
+}
+
+fn process_part2(content: String) -> String {
+    process_game(content, |enc_opponent, enc_mine| {
+        let choice_opp = OPPONENT_CHOICE_MAP
+            .get(enc_opponent)
+            .expect("Exhaustive OPPONENT_CHOICE_MAP");
+        let choice_mine = match enc_mine {
+            "X" => {
+                println!("I should lose");
+                Choice::iter()
+                    .find(|c| BEATS_MAP.get(choice_opp).expect("exhaustive BEATS_MAP") == c)
+                    .expect("Find losing choice")
+            }
+            "Y" => {
+                println!("I should draw");
+                Choice::iter()
+                    .find(|c| {
+                        BEATS_MAP.get(choice_opp).expect("exhaustive BEATS_MAP") != c
+                            && BEATS_MAP.get(c).expect("exhaustive BEATS_MAP") != choice_opp
+                    })
+                    .expect("Find drawing choice")
+            }
+            "Z" => {
+                println!("I should win");
+                Choice::iter()
+                    .find(|c| BEATS_MAP.get(c).expect("exhaustive BEATS_MAP") == choice_opp)
+                    .expect("Find winning choice")
+            }
+            &_ => panic!("Unknown enc_mine: {}", enc_mine),
+        };
+        (*choice_opp, choice_mine)
+    })
+}
+
+pub fn main() {
+    println!("Hello, AdventOfCode day 2!");
+    let content = fs::read_to_string("input.txt").expect("need input");
+
+    println!("Part 1: {}", process_part1(content.clone()));
+    println!();
+    println!("Part 2: {}", process_part2(content));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXAMPLE: &str = "A Y
+B X
+C Z";
+
+    #[test]
+    fn example_part1() {
+        let result = process_part1(EXAMPLE.into());
+        assert_eq!(result, "15");
+    }
+
+    #[test]
+    fn example_part2() {
+        let result = process_part2(EXAMPLE.into());
+        assert_eq!(result, "12");
+    }
+}
