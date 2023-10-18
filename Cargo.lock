@@ -21,6 +21,10 @@ name = "day03"
 version = "0.1.0"
 
 [[package]]
+name = "day03_other_solution"
+version = "0.1.0"
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
